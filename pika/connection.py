@@ -141,7 +141,7 @@ class NullReconnectionStrategy:
     def on_connection_closed(self, conn): pass
 
 class Connection:
-    def __init__(self, parameters, wait_for_open = True, reconnection_strategy = None):
+    def __init__(self, parameters, reconnection_strategy = None):
         self.parameters = parameters
         self.reconnection_strategy = reconnection_strategy or NullReconnectionStrategy()
 
@@ -150,13 +150,9 @@ class Connection:
         self._reset_per_connection_state()
         self.reconnect()
 
-        if wait_for_open:
-            self.wait_for_open()
-
     def _reset_per_connection_state(self):
         self.state = codec.ConnectionState()
         self.server_properties = None
-        self.outbound_buffer = simplebuffer.SimpleBuffer()
         self.frame_handler = self._login1
         self.channels = {}
         self.next_channel = 0
@@ -178,7 +174,7 @@ class Connection:
         self._reset_per_connection_state()
         try:
             self.connect(self.parameters.host, self.parameters.port or spec.PORT)
-            self.send_frame(self._local_protocol_header())
+            self.send_frame(self._local_protocol_header(), self.read_frame)
         except:
             self.reconnection_strategy.on_connect_attempt_failure(self)
             raise
@@ -291,48 +287,61 @@ class Connection:
         if channel_number in self.channels:
             del self.channels[channel_number]
 
-    def send_frame(self, frame):
+    def send_frame(self, frame, callback):
         marshalled_frame = frame.marshal()
         self.bytes_sent = self.bytes_sent + len(marshalled_frame)
-        self.outbound_buffer.write(marshalled_frame)
+        self.io_stream.write(marshalled_frame, callback)
         #print 'Wrote %r' % (frame, )
 
-    def send_method(self, channel_number, method, content = None):
-        self.send_frame(codec.FrameMethod(channel_number, method))
-        props = None
-        body = None
+    def send_method(self, channel_number, method, content=None, callback=None):
         if isinstance(content, tuple):
-            props = content[0]
-            body = content[1]
+            props, body = content
         else:
+            props = None
             body = content
-        if props:
-            length = 0
-            if body: length = len(body)
-            self.send_frame(codec.FrameHeader(channel_number, length, props))
-        if body:
-            maxpiece = (self.state.frame_max - \
-                        codec.ConnectionState.HEADER_SIZE - \
-                        codec.ConnectionState.FOOTER_SIZE)
-            body_buf = simplebuffer.SimpleBuffer( body )
-            while body_buf:
-                piecelen = min(len(body_buf), maxpiece)
-                piece = body_buf.read_and_consume( piecelen )
-                self.send_frame(codec.FrameBody(channel_number, piece))
+        self.send_frame(
+            codec.FrameMethod(channel_number, method),
+            lambda: self._send_method_props(channel_number, props, body, callback))
 
-    def _rpc(self, channel_number, method, acceptable_replies):
-        channel = self._ensure_channel(channel_number)
-        self.send_method(channel_number, method)
-        return channel.wait_for_reply(acceptable_replies)
+    def _send_method_props(self, channel_number, props, body, callback):
+        if props:
+            self.send_frame(
+                codec.FrameHeader(channel_number, len(body or ''), props),
+                lambda: self._send_method_body(channel_number, body, callback))
+        else:
+            self._send_method_body(channel_number, body, callback)
+
+    def _send_method_body(self, channel_number, body, callback):
+        if body:
+            maxpiece = (
+                self.state.frame_max -
+                codec.ConnectionState.HEADER_SIZE -
+                codec.ConnectionState.FOOTER_SIZE)
+            body_buf = simplebuffer.SimpleBuffer(body)
+            self._send_method_body_piece(
+                channel_number, body_buf, maxpiece, callback)
+        elif callback is not None:
+            callback()
+
+    def _send_method_body_piece(
+        self, channel_number, body_buf, maxpiece, callback):
+        piecelen = min(len(body_buf), maxpiece)
+        piece = body_buf.read_and_consume(piecelen)
+        if body_buf:
+            funct = lambda: self._send_method_body_piece(
+                body_buf, maxpiece, callback)
+        else:
+            funct = callback
+        self.send_frame(codec.FrameBody(channel_number, piece), funct)
 
     def _login1(self, frame):
         if isinstance(frame, codec.FrameProtocolHeader):
-            raise ProtocolVersionMismatch(self._local_protocol_header(),
-                                          frame)
+            raise ProtocolVersionMismatch(
+                self._local_protocol_header(), frame)
 
         if (frame.method.version_major, frame.method.version_minor) != spec.PROTOCOL_VERSION:
-            raise ProtocolVersionMismatch(self._local_protocol_header(),
-                                          frame)
+            raise ProtocolVersionMismatch(
+                self._local_protocol_header(), frame)
 
         self.server_properties = frame.method.server_properties
 
@@ -341,12 +350,12 @@ class Connection:
         if not response:
             raise LoginError("No acceptable SASL mechanism for the given credentials",
                              credentials)
-        self.send_method(0, spec.Connection.StartOk(client_properties = \
-                                                      {"product": "Pika Python AMQP Client Library"},
-                                                    mechanism = response[0],
-                                                    response = response[1]))
         self.erase_credentials()
         self.frame_handler = self._login2
+        self.send_method(
+            0, spec.Connection.StartOk(
+                client_properties={"product": "Pika Python AMQP Client Library"},
+                mechanism=response[0], response=response[1]))
 
     def erase_credentials(self):
         """Override if in some context you need the object to forget
@@ -354,23 +363,28 @@ class Connection:
         pass
 
     def _login2(self, frame):
-        channel_max = combine_tuning(self.parameters.channel_max, frame.method.channel_max)
-        frame_max = combine_tuning(self.parameters.frame_max, frame.method.frame_max)
-        heartbeat = combine_tuning(self.parameters.heartbeat, frame.method.heartbeat)
+        channel_max = combine_tuning(
+            self.parameters.channel_max, frame.method.channel_max)
+        frame_max = combine_tuning(
+            self.parameters.frame_max, frame.method.frame_max)
+        heartbeat = combine_tuning(
+            self.parameters.heartbeat, frame.method.heartbeat)
         if heartbeat:
             self.heartbeat_checker = HeartbeatChecker(self, heartbeat)
+
         self.state.tune(channel_max, frame_max)
         self.send_method(0, spec.Connection.TuneOk(
-            channel_max = channel_max,
-            frame_max = frame_max,
-            heartbeat = heartbeat))
+            channel_max=channel_max, frame_max=frame_max, heartbeat=heartbeat))
         self.frame_handler = self._generic_frame_handler
-        self._install_channel0()
-        self.known_hosts = \
-                         self._rpc(0, spec.Connection.Open(virtual_host = \
-                                                               self.parameters.virtual_host,
-                                                           insist = True),
-                                   [spec.Connection.OpenOk]).known_hosts
+        channel0 = self._install_channel0()
+
+        channel0.reply_map = {spec.Connection.OpenOk: self._read_known_hosts}
+        self.send_method(
+            0, spec.Connection.Open(
+                virtual_host=self.parameters.virtual_host, insist=True))
+
+    def _read_known_hosts(self, frame):
+        self._known_hosts = frame.known_hosts
         self.connection_open = True
         self.handle_connection_open()
 
@@ -380,9 +394,10 @@ class Connection:
     def _install_channel0(self):
         c = channel.ChannelHandler(self, 0)
         c.async_map[spec.Connection.Close] = self._async_connection_close
+        return c
 
-    def channel(self):
-        return channel.Channel(channel.ChannelHandler(self))
+    def channel(self, callback):
+        return channel.Channel(channel.ChannelHandler(self), callback)
 
     def wait_for_open(self):
         while (not self.connection_open) and \
@@ -407,6 +422,25 @@ class Connection:
             pass # we already counted the received bytes for our heartbeat checker
         else:
             self.channels[frame.channel_number].frame_handler(frame)
+
+    def read_frame(self):
+        self.io_stream.read_bytes(
+            self.state.HEADER_SIZE, self._read_frame_header)
+
+    def _read_frame_header(self, data):
+        self.state._waiting_for_header(data)
+        self.io_stream.read_bytes(self.state.target_size, self._read_data)
+
+    def _read_data(self, data):
+        frame = self.state.state(data)
+        if frame is not None:
+            self.frame_handler(frame)
+            self.read_frame()
+        else:
+            self.io_stream.read_bytes(self.state.target_size, self.state.state)
+
+
+
 
 def combine_tuning(a, b):
     if a == 0: return b

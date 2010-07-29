@@ -138,41 +138,19 @@ class ConnectionState:
     def _inbound(self):
         return ''.join(self.inbound_buffer)
 
-    def handle_input(self, received_data):
-        total_bytes_consumed = 0
-
-        while True:
-            if not received_data:
-                return (total_bytes_consumed, None)
-
-            bytes_consumed = self.target_size - self.inbound_available
-            if len(received_data) < bytes_consumed:
-                bytes_consumed = len(received_data)
-
-            self.inbound_buffer.append(received_data[:bytes_consumed])
-            self.inbound_available = self.inbound_available + bytes_consumed
-            received_data = received_data[bytes_consumed:]
-            total_bytes_consumed = total_bytes_consumed + bytes_consumed
-
-            if self.inbound_available < self.target_size:
-                return (total_bytes_consumed, None)
-
-            maybe_result = self.state(self._inbound())
-            if maybe_result:
-                return (total_bytes_consumed, maybe_result)
-
     def _waiting_for_header(self, inbound):
         # Here we switch state without resetting the inbound_buffer,
         # because we want to keep the frame header.
-        
+
+        self._header = inbound
         if inbound[:3] == 'AMQ':
             # Protocol header.
-            self.target_size = 8
+            self.target_size = 1
             self.state = self._waiting_for_protocol_header
         else:
-            self.target_size = struct.unpack_from('>I', inbound, 3)[0] + \
-                               ConnectionState.HEADER_SIZE + \
-                               ConnectionState.FOOTER_SIZE
+            self.target_size = (
+                struct.unpack_from('>I', inbound, 3)[0] +
+                ConnectionState.FOOTER_SIZE)
             self.state = self._waiting_for_body
 
     def _waiting_for_body(self, inbound):
@@ -181,21 +159,20 @@ class ConnectionState:
 
         self._return_to_idle()
 
-        (frame_type, channel_number) = struct.unpack_from('>BH', inbound, 0)
+        (frame_type, channel_number) = struct.unpack_from('>BH', self._header)
         if frame_type == spec.FRAME_METHOD:
-            method_id = struct.unpack_from('>I', inbound, ConnectionState.HEADER_SIZE)[0]
+            method_id = struct.unpack_from('>I', inbound)[0]
             method = spec.methods[method_id]()
-            method.decode(inbound, ConnectionState.HEADER_SIZE + 4)
+            method.decode(inbound, 4)
             return FrameMethod(channel_number, method)
         elif frame_type == spec.FRAME_HEADER:
-            (class_id, body_size) = struct.unpack_from('>HxxQ', inbound,
-                                                       ConnectionState.HEADER_SIZE)
+            (class_id, body_size) = struct.unpack_from('>HxxQ', inbound)
             props = spec.props[class_id]()
-            props.decode(inbound, ConnectionState.HEADER_SIZE + 12)
+            props.decode(inbound, 12)
             return FrameHeader(channel_number, body_size, props)
         elif frame_type == spec.FRAME_BODY:
-            return FrameBody(channel_number,
-                             inbound[ConnectionState.HEADER_SIZE : -ConnectionState.FOOTER_SIZE])
+            return FrameBody(
+                channel_number, inbound[:-ConnectionState.FOOTER_SIZE])
         elif frame_type == spec.FRAME_HEARTBEAT:
             return FrameHeartbeat()
         else:
@@ -203,6 +180,7 @@ class ConnectionState:
             return None
 
     def _waiting_for_protocol_header(self, inbound):
+        inbound = self._header + inbound
         if inbound[3] != 'P':
             raise InvalidProtocolHeader(inbound)
 

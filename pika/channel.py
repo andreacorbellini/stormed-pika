@@ -128,7 +128,8 @@ class ChannelHandler:
                 method._set_content(header_frame.properties, body)
             handler = self.reply_map[methodClass]
             self.reply_map = None
-            handler(method)
+            if handler is not None:
+                handler(method)
         elif methodClass in self.async_map:
             self.async_map[methodClass](method_frame, header_frame, body)
         else:
@@ -136,8 +137,6 @@ class ChannelHandler:
                                   'Pika: method not implemented: ' + methodClass.NAME)
 
     def _handle_method(self, frame):
-        if not isinstance(frame, codec.FrameMethod):
-            raise UnexpectedFrameError(frame)
         if spec.has_content(frame.method.INDEX):
             self.frame_handler = self._make_header_handler(frame)
         else:
@@ -175,15 +174,17 @@ class ChannelHandler:
         else:
             self.frame_handler = handler
 
-    def _rpc(self, method, acceptable_replies):
-        self._ensure()
-        return self.connection._rpc(self.channel_number, method, acceptable_replies)
+    def _rpc(self, method, acceptable_replies, callback=None):
+        self.reply_map = dict(
+            (reply, callback) for reply in acceptable_replies)
+        self.connection.send_method(
+            self.channel_number, method)
 
     def content_transmission_forbidden(self):
         return not self.flow_active
 
 class Channel(spec.DriverMixin):
-    def __init__(self, handler):
+    def __init__(self, handler, callback):
         self.handler = handler
         self.callbacks = {}
         self.pending = {}
@@ -195,7 +196,8 @@ class Channel(spec.DriverMixin):
         handler.async_map[spec.Basic.Deliver] = self._async_basic_deliver
         handler.async_map[spec.Basic.Return] = self._async_basic_return
 
-        self.handler._rpc(spec.Channel.Open(), [spec.Channel.OpenOk])
+        self.handler._rpc(
+            spec.Channel.Open(), [spec.Channel.OpenOk], lambda method: callback())
 
     def addStateChangeHandler(self, handler, key = None):
         self.handler.addStateChangeHandler(handler, key)
@@ -242,14 +244,13 @@ class Channel(spec.DriverMixin):
             else:
                 raise ContentTransmissionForbidden(self)
         properties = properties or spec.BasicProperties()
-        self.handler.connection.send_method(self.handler.channel_number,
-                                            spec.Basic.Publish(exchange = exchange,
-                                                               routing_key = routing_key,
-                                                               mandatory = mandatory,
-                                                               immediate = immediate),
-                                            (properties, body))
+        self.handler.connection.send_method(
+            self.handler.channel_number, spec.Basic.Publish(
+                exchange=exchange, routing_key=routing_key,
+                mandatory=mandatory, immediate=immediate),
+            (properties, body))
 
-    def basic_consume(self, consumer, queue = '', no_ack = False, exclusive = False, consumer_tag = None):
+    def basic_consume(self, consumer, queue='', no_ack=False, exclusive=False, consumer_tag=None):
         tag = consumer_tag
         if not tag:
             tag = 'ctag' + str(self.next_consumer_tag)
@@ -259,11 +260,11 @@ class Channel(spec.DriverMixin):
             raise DuplicateConsumerTag(tag)
 
         self.callbacks[tag] = consumer
-        return self.handler._rpc(spec.Basic.Consume(queue = queue,
-                                                    consumer_tag = tag,
-                                                    no_ack = no_ack,
-                                                    exclusive = exclusive),
-                                 [spec.Basic.ConsumeOk]).consumer_tag
+        self.handler._rpc(
+            spec.Basic.Consume(
+                queue=queue, consumer_tag=tag, no_ack=no_ack,
+                exclusive=exclusive),
+            [spec.Basic.ConsumeOk])
 
     def basic_cancel(self, consumer_tag):
         if not consumer_tag in self.callbacks:

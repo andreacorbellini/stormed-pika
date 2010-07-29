@@ -60,6 +60,8 @@ asyncore_loop = pika.asyncore_adapter.loop
 
 from pika.blocking_adapter import \
     BlockingConnection
+from pika.tornado_adapter import \
+    TornadoConnection
 
 def repl_channel(host = '127.0.0.1', *args):
     return BlockingConnection(ConnectionParameters(host, *args)).channel()
