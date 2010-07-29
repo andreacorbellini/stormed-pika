@@ -2990,67 +2990,83 @@ def has_content(methodNumber):
     return False
 
 class DriverMixin:
-    def exchange_declare(self, ticket = 1, exchange = None, type = 'direct', passive = False, durable = False, auto_delete = False, internal = False, nowait = False, arguments = {}):
+    def exchange_declare(self, ticket = 1, exchange = None, type = 'direct', passive = False, durable = False, auto_delete = False, internal = False, nowait = False, arguments = {}, callback=None):
         return self.handler._rpc(Exchange.Declare(ticket = ticket, exchange = exchange, type = type, passive = passive, durable = durable, auto_delete = auto_delete, internal = internal, nowait = nowait, arguments = arguments),
-                                 [Exchange.DeclareOk])
+                                 [Exchange.DeclareOk],
+                                 callback=lambda frame: callback())
 
-    def exchange_delete(self, ticket = 1, exchange = None, if_unused = False, nowait = False):
+    def exchange_delete(self, ticket = 1, exchange = None, if_unused = False, nowait = False, callback=None):
         return self.handler._rpc(Exchange.Delete(ticket = ticket, exchange = exchange, if_unused = if_unused, nowait = nowait),
-                                 [Exchange.DeleteOk])
+                                 [Exchange.DeleteOk],
+                                 callback=lambda frame: callback())
 
-    def queue_declare(self, ticket = 1, queue = '', passive = False, durable = False, exclusive = False, auto_delete = False, nowait = False, arguments = {}):
+    def queue_declare(self, ticket = 1, queue = '', passive = False, durable = False, exclusive = False, auto_delete = False, nowait = False, arguments = {}, callback=None):
         return self.handler._rpc(Queue.Declare(ticket = ticket, queue = queue, passive = passive, durable = durable, exclusive = exclusive, auto_delete = auto_delete, nowait = nowait, arguments = arguments),
-                                 [Queue.DeclareOk])
+                                 [Queue.DeclareOk],
+                                 callback=lambda frame: callback())
 
-    def queue_bind(self, ticket = 1, queue = None, exchange = None, routing_key = '', nowait = False, arguments = {}):
+    def queue_bind(self, ticket = 1, queue = None, exchange = None, routing_key = '', nowait = False, arguments = {}, callback=None):
         return self.handler._rpc(Queue.Bind(ticket = ticket, queue = queue, exchange = exchange, routing_key = routing_key, nowait = nowait, arguments = arguments),
-                                 [Queue.BindOk])
+                                 [Queue.BindOk],
+                                 callback=lambda frame: callback())
 
-    def queue_purge(self, ticket = 1, queue = None, nowait = False):
+    def queue_purge(self, ticket = 1, queue = None, nowait = False, callback=None):
         return self.handler._rpc(Queue.Purge(ticket = ticket, queue = queue, nowait = nowait),
-                                 [Queue.PurgeOk])
+                                 [Queue.PurgeOk],
+                                 callback=lambda frame: callback())
 
-    def queue_delete(self, ticket = 1, queue = None, if_unused = False, if_empty = False, nowait = False):
+    def queue_delete(self, ticket = 1, queue = None, if_unused = False, if_empty = False, nowait = False, callback=None):
         return self.handler._rpc(Queue.Delete(ticket = ticket, queue = queue, if_unused = if_unused, if_empty = if_empty, nowait = nowait),
-                                 [Queue.DeleteOk])
+                                 [Queue.DeleteOk],
+                                 callback=lambda frame: callback())
 
-    def queue_unbind(self, ticket = 1, queue = None, exchange = None, routing_key = '', arguments = {}):
+    def queue_unbind(self, ticket = 1, queue = None, exchange = None, routing_key = '', arguments = {}, callback=None):
         return self.handler._rpc(Queue.Unbind(ticket = ticket, queue = queue, exchange = exchange, routing_key = routing_key, arguments = arguments),
-                                 [Queue.UnbindOk])
+                                 [Queue.UnbindOk],
+                                 callback=lambda frame: callback())
 
-    def basic_qos(self, prefetch_size = 0, prefetch_count = 0, global_ = False):
+    def basic_qos(self, prefetch_size = 0, prefetch_count = 0, global_ = False, callback=None):
         return self.handler._rpc(Basic.Qos(prefetch_size = prefetch_size, prefetch_count = prefetch_count, global_ = global_),
-                                 [Basic.QosOk])
+                                 [Basic.QosOk],
+                                 callback=lambda frame: callback())
 
-    def basic_get(self, ticket = 1, queue = None, no_ack = False):
+    def basic_get(self, ticket = 1, queue = None, no_ack = False, callback=None):
         return self.handler._rpc(Basic.Get(ticket = ticket, queue = queue, no_ack = no_ack),
-                                 [Basic.GetOk, Basic.GetEmpty])
+                                 [Basic.GetOk, Basic.GetEmpty],
+                                 callback=lambda frame: callback())
 
-    def basic_ack(self, delivery_tag = 0, multiple = False):
+    def basic_ack(self, delivery_tag = 0, multiple = False, callback=None):
         return self.handler._rpc(Basic.Ack(delivery_tag = delivery_tag, multiple = multiple),
-                                 [])
+                                 [],
+                                 callback=lambda frame: callback())
 
-    def basic_reject(self, delivery_tag = None, requeue = True):
+    def basic_reject(self, delivery_tag = None, requeue = True, callback=None):
         return self.handler._rpc(Basic.Reject(delivery_tag = delivery_tag, requeue = requeue),
-                                 [])
+                                 [],
+                                 callback=lambda frame: callback())
 
-    def basic_recover_async(self, requeue = False):
+    def basic_recover_async(self, requeue = False, callback=None):
         return self.handler._rpc(Basic.RecoverAsync(requeue = requeue),
-                                 [])
+                                 [],
+                                 callback=lambda frame: callback())
 
-    def basic_recover(self, requeue = False):
+    def basic_recover(self, requeue = False, callback=None):
         return self.handler._rpc(Basic.Recover(requeue = requeue),
-                                 [Basic.RecoverOk])
+                                 [Basic.RecoverOk],
+                                 callback=lambda frame: callback())
 
-    def tx_select(self):
+    def tx_select(self, callback=None):
         return self.handler._rpc(Tx.Select(),
-                                 [Tx.SelectOk])
+                                 [Tx.SelectOk],
+                                 callback=lambda frame: callback())
 
-    def tx_commit(self):
+    def tx_commit(self, callback=None):
         return self.handler._rpc(Tx.Commit(),
-                                 [Tx.CommitOk])
+                                 [Tx.CommitOk],
+                                 callback=lambda frame: callback())
 
-    def tx_rollback(self):
+    def tx_rollback(self, callback=None):
         return self.handler._rpc(Tx.Rollback(),
-                                 [Tx.RollbackOk])
+                                 [Tx.RollbackOk],
+                                 callback=lambda frame: callback())
 

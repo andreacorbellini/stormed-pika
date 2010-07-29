@@ -352,13 +352,14 @@ def generate(specPath):
     for m in spec.allMethods():
         if m.structName() in DRIVER_METHODS:
             acceptable_replies = DRIVER_METHODS[m.structName()]
-            print "    def %s(self%s):" % (pyize(m.klass.name + '_' + m.name),
-                                           fieldDeclList(m.arguments))
+            print "    def %s(self%s, callback=None):" % (
+                pyize(m.klass.name + '_' + m.name), fieldDeclList(m.arguments))
             print "        return self.handler._rpc(%s(%s)," % \
                   (m.structName(), ', '.join(["%s = %s" % (pyize(f.name), pyize(f.name))
                                               for f in m.arguments]))
-            print "                                 [%s])" % \
+            print "                                 [%s]," % \
                   (', '.join(acceptable_replies),)
+            print "                                 callback=lambda frame: callback())"
             print
 
 if __name__ == "__main__":
