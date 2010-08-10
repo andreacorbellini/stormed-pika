@@ -1,3 +1,11 @@
+"""
+* /open -- This will open a channel and declare a queue.
+* /get -- Will display the incoming messages.
+* /publish?msg=abc -- Will publish 'abc'.
+
+Everything's unblocking, so you can keep /get open while /publish-ing messages.
+"""
+
 import sys
 from tornado import httpserver, ioloop, web
 import pika
