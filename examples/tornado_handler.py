@@ -17,23 +17,29 @@ class OpenHandler(web.RequestHandler):
         global channel
         self.write('Opening channel... ')
         channel = conn.channel(self.queue_declare)
-        self.write('Done<br>')
 
     def queue_declare(self):
-        self.write('Declaring queue... ')
+        self.write('Done<br>Declaring queue... ')
         channel.queue_declare(
-            queue='test', durable=False, exclusive=False, auto_delete=True)
+            queue='test', durable=False, exclusive=False, auto_delete=True,
+            callback=self.queue_declared)
+
+    def queue_declared(self):
         self.write('Done')
         self.finish()
 
 
 class PublishHandler(web.RequestHandler):
 
+    @web.asynchronous
     def get(self):
         msg = self.get_argument('msg').encode('utf-8')
         self.write('Publishing: %r... ' % msg)
-        channel.basic_publish('', 'test', msg)
+        channel.basic_publish('', 'test', msg, callback=self.msg_published)
+
+    def msg_published(self):
         self.write('Done')
+        self.finish()
 
 
 class GetHandler(web.RequestHandler):

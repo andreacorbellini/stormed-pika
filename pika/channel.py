@@ -236,7 +236,7 @@ class Channel(spec.DriverMixin):
         self.handler._set_channel_close(c)
         return self.handler.channel_close
 
-    def basic_publish(self, exchange, routing_key, body, properties = None, mandatory = False, immediate = False, block_on_flow_control = False):
+    def basic_publish(self, exchange, routing_key, body, properties=None, mandatory=False, immediate=False, block_on_flow_control=False, callback=None):
         if self.handler.content_transmission_forbidden():
             if block_on_flow_control:
                 while self.handler.content_transmission_forbidden():
@@ -248,9 +248,9 @@ class Channel(spec.DriverMixin):
             self.handler.channel_number, spec.Basic.Publish(
                 exchange=exchange, routing_key=routing_key,
                 mandatory=mandatory, immediate=immediate),
-            (properties, body))
+            (properties, body), callback=callback)
 
-    def basic_consume(self, consumer, queue='', no_ack=False, exclusive=False, consumer_tag=None):
+    def basic_consume(self, consumer, queue='', no_ack=False, exclusive=False, consumer_tag=None, callback=None):
         tag = consumer_tag
         if not tag:
             tag = 'ctag' + str(self.next_consumer_tag)
@@ -264,7 +264,7 @@ class Channel(spec.DriverMixin):
             spec.Basic.Consume(
                 queue=queue, consumer_tag=tag, no_ack=no_ack,
                 exclusive=exclusive),
-            [spec.Basic.ConsumeOk])
+            [spec.Basic.ConsumeOk], callback=callback)
 
     def basic_cancel(self, consumer_tag):
         if not consumer_tag in self.callbacks:
