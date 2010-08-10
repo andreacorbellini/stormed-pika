@@ -106,8 +106,12 @@ class AsyncoreConnection(pika.connection.Connection):
         if self.dispatcher:
             self.dispatcher.close()
 
-    def drain_events(self):
-        loop(count = 1)
+    def flush_outbound(self):
+        while self.outbound_buffer:
+            self.drain_events()
+
+    def drain_events(self, timeout=None):
+        loop(count = 1, timeout = timeout)
 
 timer_heap = []
 
@@ -117,12 +121,16 @@ def add_oneshot_timer_abs(firing_time, callback):
 def add_oneshot_timer_rel(firing_delay, callback):
     add_oneshot_timer_abs(time.time() + firing_delay, callback)
 
-def next_event_timeout(): 
+def next_event_timeout(default_timeout=None): 
     cutoff = run_timers_internal()
     if timer_heap:
         timeout = timer_heap[0][0] - cutoff
-    else:
+        if default_timeout is not None and timeout > default_timeout:
+            timeout = default_timeout
+    elif default_timeout is None:
         timeout = 30.0 # default timeout
+    else:
+        timeout = default_timeout
     return timeout
 
 def log_timer_error(info):
@@ -139,20 +147,20 @@ def run_timers_internal():
         cutoff = time.time()
     return cutoff
 
-def loop1(map):
+def loop1(map, timeout=None):
     if map:
-        asyncore.loop(timeout = next_event_timeout(), map = map, count = 1)
+        asyncore.loop(timeout = next_event_timeout(timeout), map = map, count = 1)
     else:
-        time.sleep(next_event_timeout())
+        time.sleep(next_event_timeout(timeout))
 
-def loop(map = None, count = None):
+def loop(map = None, count = None, timeout=None):
     if map is None:
         map = asyncore.socket_map
     if count is None:
         while (map or timer_heap):
-            loop1(map)
+            loop1(map, timeout)
     else:
         while (map or timer_heap) and count > 0:
-            loop1(map)
+            loop1(map, timeout)
             count = count - 1
         run_timers_internal()
